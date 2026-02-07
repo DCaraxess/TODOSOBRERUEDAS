@@ -13,7 +13,7 @@ const SPREADSHEET_ID = '1xMqZV5HlYMEdX0FDNi3GubAuw8vaXchV-AB0uQPf1xA'; // Se obt
 // ============================================================
 // IMPORTANTE: Reemplaza estos emails con tus correos reales
 const USUARIOS_AUTORIZADOS = [
-  'tu-correo-principal@gmail.com',    // Tu correo principal
+  'diego.cartes2101@alumnos.ubiobio.cl',    // Tu correo principal
   'tu-segundo-correo@gmail.com'       // Tu segundo correo
 ];
 
@@ -50,6 +50,27 @@ function doGet() {
   return HtmlService.createHtmlOutputFromFile('interfaz_web')
     .setTitle('TODO SOBRE RUEDAS - Sistema de Inventario')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Parsea una fecha string (YYYY-MM-DD) sin problemas de zona horaria
+ * Evita el bug donde new Date('2026-02-07') se interpreta en UTC y retrocede un día
+ */
+function parsearFecha(fechaString) {
+  if (!fechaString) return new Date();
+  
+  // Si ya es un objeto Date, devolverlo
+  if (fechaString instanceof Date) return fechaString;
+  
+  // Parsear string formato YYYY-MM-DD
+  const partes = fechaString.split('-');
+  if (partes.length === 3) {
+    // Crear fecha usando año, mes (0-indexed), día en hora local
+    return new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]), 12, 0, 0);
+  }
+  
+  // Fallback: intentar parsear normalmente
+  return new Date(fechaString);
 }
 
 // ============================================================
@@ -93,7 +114,7 @@ function guardarCompra(datos) {
     
     // Escribir todos los datos directamente
     hoja.getRange(filaDestino, 1).setValue(nuevoID);                    // A: ID
-    hoja.getRange(filaDestino, 2).setValue(new Date(datos.fecha));      // B: FECHA COMPRA
+    hoja.getRange(filaDestino, 2).setValue(parsearFecha(datos.fecha));  // B: FECHA COMPRA
     hoja.getRange(filaDestino, 3).setValue(datos.marca);                // C: MARCA
     hoja.getRange(filaDestino, 4).setValue(datos.medida);               // D: MEDIDA
     hoja.getRange(filaDestino, 5).setValue(datos.modelo);               // E: MODELO
@@ -101,12 +122,12 @@ function guardarCompra(datos) {
     hoja.getRange(filaDestino, 7).setValue(parseInt(datos.cantidad));   // G: CANTIDAD
     hoja.getRange(filaDestino, 8).setValue(parseFloat(datos.precio));   // H: PRECIO COMPRA
     
-    // Fórmulas para PRECIO +35% y PRECIO VENTA
-    // Calcular directamente sin fórmulas para evitar problemas de idioma
+    // Fórmulas para PRECIO CON IVA+MARGEN y PRECIO VENTA
+    // Calcular: Precio Neto × 1.19 (IVA) × 1.35 (Margen) = × 1.6065
     const precioCompra = parseFloat(datos.precio);
-    const precioMas35 = precioCompra * 1.35;
-    hoja.getRange(filaDestino, 9).setValue(precioMas35);  // I: PRECIO +35%
-    hoja.getRange(filaDestino, 10).setValue(precioMas35); // J: PRECIO VENTA
+    const precioConIvaMargen = Math.round(precioCompra * 1.19 * 1.35); // IVA 19% + Margen 35% (redondeado)
+    hoja.getRange(filaDestino, 9).setValue(precioConIvaMargen);  // I: PRECIO +IVA+35%
+    hoja.getRange(filaDestino, 10).setValue(precioConIvaMargen); // J: PRECIO VENTA
     
     hoja.getRange(filaDestino, 11).setValue(datos.proveedor || '');     // K: PROVEEDOR
     hoja.getRange(filaDestino, 12).setValue(datos.factura || '');       // L: N° FACTURA
@@ -197,15 +218,15 @@ function actualizarInventario(datos) {
     const precioCompraInv = parseFloat(datos.precio);
     hojaInventario.getRange(filaDestino, 7).setValue(precioCompraInv);
     
-    // H: PRECIO +35%
-    const precioMas35Inv = precioCompraInv * 1.35;
-    hojaInventario.getRange(filaDestino, 8).setValue(precioMas35Inv);
+    // H: PRECIO +IVA+35% (Precio Neto × 1.19 IVA × 1.35 Margen) - Redondeado a entero
+    const precioConIvaMargenInv = Math.round(precioCompraInv * 1.19 * 1.35);
+    hojaInventario.getRange(filaDestino, 8).setValue(precioConIvaMargenInv);
     
     // I: PRECIO VENTA
-    hojaInventario.getRange(filaDestino, 9).setValue(precioMas35Inv);
+    hojaInventario.getRange(filaDestino, 9).setValue(precioConIvaMargenInv);
     
     // J: ÚLTIMA COMPRA
-    hojaInventario.getRange(filaDestino, 10).setValue(new Date(datos.fecha));
+    hojaInventario.getRange(filaDestino, 10).setValue(parsearFecha(datos.fecha));
     
     // K: ÚLTIMA CANTIDAD
     hojaInventario.getRange(filaDestino, 11).setValue(parseInt(datos.cantidad));
@@ -240,7 +261,7 @@ function actualizarInventarioExistente(datos) {
       const nuevoStock = stockActual + parseInt(datos.cantidad);
       hojaInventario.getRange(filaReal, 6).setValue(nuevoStock);
       
-      // G: Actualizar PRECIO COMPRA PROMEDIO (promedio ponderado)
+      // G: Actualizar PRECIO COMPRA PROMEDIO (promedio ponderado) - Redondeado a entero
       const precioActual = fila[6] || 0;
       const cantidadNueva = parseInt(datos.cantidad);
       const precioNuevo = parseFloat(datos.precio);
@@ -248,21 +269,21 @@ function actualizarInventarioExistente(datos) {
       
       if (stockActual > 0 && precioActual > 0) {
         // Promedio ponderado
-        nuevoPrecioPromedio = ((precioActual * stockActual) + (precioNuevo * cantidadNueva)) / nuevoStock;
+        nuevoPrecioPromedio = Math.round(((precioActual * stockActual) + (precioNuevo * cantidadNueva)) / nuevoStock);
       } else {
-        nuevoPrecioPromedio = precioNuevo;
+        nuevoPrecioPromedio = Math.round(precioNuevo);
       }
       hojaInventario.getRange(filaReal, 7).setValue(nuevoPrecioPromedio);
       
-      // H: PRECIO +35%
-      const precioMas35 = nuevoPrecioPromedio * 1.35;
-      hojaInventario.getRange(filaReal, 8).setValue(precioMas35);
+      // H: PRECIO +IVA+35% (Precio Neto × 1.19 IVA × 1.35 Margen) - Redondeado a entero
+      const precioConIvaMargen = Math.round(nuevoPrecioPromedio * 1.19 * 1.35);
+      hojaInventario.getRange(filaReal, 8).setValue(precioConIvaMargen);
       
       // I: PRECIO VENTA
-      hojaInventario.getRange(filaReal, 9).setValue(precioMas35);
+      hojaInventario.getRange(filaReal, 9).setValue(precioConIvaMargen);
       
       // J: ÚLTIMA COMPRA
-      hojaInventario.getRange(filaReal, 10).setValue(new Date(datos.fecha));
+      hojaInventario.getRange(filaReal, 10).setValue(parsearFecha(datos.fecha));
       
       // K: ÚLTIMA CANTIDAD
       hojaInventario.getRange(filaReal, 11).setValue(cantidadNueva);
@@ -310,7 +331,7 @@ function guardarVenta(datos) {
     
     // Escribir todos los datos directamente
     hoja.getRange(filaDestino, 1).setValue(nuevoID);                    // A: ID
-    hoja.getRange(filaDestino, 2).setValue(new Date(datos.fecha));      // B: FECHA VENTA
+    hoja.getRange(filaDestino, 2).setValue(parsearFecha(datos.fecha));  // B: FECHA VENTA
     hoja.getRange(filaDestino, 3).setValue(datos.marca);                // C: MARCA
     hoja.getRange(filaDestino, 4).setValue(datos.medida);               // D: MEDIDA
     hoja.getRange(filaDestino, 5).setValue(datos.modelo);               // E: MODELO
@@ -553,13 +574,67 @@ function obtenerEstadisticas() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const hojaConsultas = ss.getSheetByName('CONSULTAS');
+    const hojaInventario = ss.getSheetByName('INVENTARIO COMPLETO');
     
-    // Leer las celdas con las estadísticas
+    // Leer las celdas con las estadísticas básicas
     const totalProductos = hojaConsultas.getRange('B14').getValue();
     const totalUnidades = hojaConsultas.getRange('B15').getValue();
     const valorInventario = hojaConsultas.getRange('B16').getValue();
     const totalCompras = hojaConsultas.getRange('B17').getValue();
     const totalVentas = hojaConsultas.getRange('B18').getValue();
+    
+    // Obtener datos para gráficos
+    let stockPorAro = {};
+    let stockPorMarca = {};
+    let productosBajoStock = 0;
+    let productosAgotados = 0;
+    
+    const ultimaFilaInv = hojaInventario.getLastRow();
+    if (ultimaFilaInv >= 2) {
+      const datosInv = hojaInventario.getRange(2, 1, ultimaFilaInv - 1, 7).getValues();
+      
+      for (let i = 0; i < datosInv.length; i++) {
+        const fila = datosInv[i];
+        const codigo = fila[0];
+        if (!codigo || codigo === '') continue;
+        
+        const aro = fila[1];
+        const marca = fila[2] || 'Sin marca';
+        const stock = parseInt(fila[5]) || 0;
+        
+        // Agrupar por ARO
+        if (aro) {
+          const aroKey = 'ARO ' + aro;
+          stockPorAro[aroKey] = (stockPorAro[aroKey] || 0) + stock;
+        }
+        
+        // Agrupar por Marca
+        if (marca) {
+          stockPorMarca[marca] = (stockPorMarca[marca] || 0) + stock;
+        }
+        
+        // Contar productos con bajo stock
+        if (stock === 0) {
+          productosAgotados++;
+        } else if (stock <= 5) {
+          productosBajoStock++;
+        }
+      }
+    }
+    
+    // Convertir a arrays ordenados para gráficos
+    const stockPorAroArray = Object.entries(stockPorAro)
+      .map(function(entry) { return { label: entry[0], value: entry[1] }; })
+      .sort(function(a, b) { 
+        const numA = parseInt(a.label.replace('ARO ', ''));
+        const numB = parseInt(b.label.replace('ARO ', ''));
+        return numA - numB;
+      });
+    
+    const stockPorMarcaArray = Object.entries(stockPorMarca)
+      .map(function(entry) { return { label: entry[0], value: entry[1] }; })
+      .sort(function(a, b) { return b.value - a.value; })
+      .slice(0, 8); // Top 8 marcas
     
     return {
       success: true,
@@ -568,7 +643,11 @@ function obtenerEstadisticas() {
         totalUnidades: totalUnidades,
         valorInventario: valorInventario,
         totalCompras: totalCompras,
-        totalVentas: totalVentas
+        totalVentas: totalVentas,
+        stockPorAro: stockPorAroArray,
+        stockPorMarca: stockPorMarcaArray,
+        productosBajoStock: productosBajoStock,
+        productosAgotados: productosAgotados
       }
     };
     
@@ -819,8 +898,8 @@ function sincronizarInventario() {
       // Calcular precio promedio
       const precioPromedio = producto.stockCompras > 0 ? producto.totalGastado / producto.stockCompras : 0;
       
-      // Calcular precio +35%
-      const precioVenta = precioPromedio * 1.35;
+      // Calcular precio +IVA+35% (Precio Neto × 1.19 IVA × 1.35 Margen)
+      const precioVenta = precioPromedio * 1.19 * 1.35;
       
       // Generar código
       if (!contadorPorAro[producto.aro]) {
@@ -1114,10 +1193,10 @@ function limpiarDatosImportados() {
       // Asegurar que precio sea número
       if (datos[i][7]) datos[i][7] = parseFloat(String(datos[i][7]).replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
       
-      // Recalcular precio +35%
+      // Recalcular precio +IVA+35% (Precio Neto × 1.19 IVA × 1.35 Margen)
       if (datos[i][7] > 0) {
-        datos[i][8] = datos[i][7] * 1.35;
-        datos[i][9] = datos[i][7] * 1.35;
+        datos[i][8] = datos[i][7] * 1.19 * 1.35;
+        datos[i][9] = datos[i][7] * 1.19 * 1.35;
       }
       
       // Generar ID si no existe
